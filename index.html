@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Studio Rekonsiliasi Jurnal & Penjualan | Sistem Verifikasi Pembukuan</title>
+  <meta name="description" content="Sistem rekonsiliasi dan verifikasi transaksi penjualan dengan jurnal pembukuan finance berbasis peramban mandiri.">
+
+  <!-- Open Graph / Facebook / WhatsApp / LinkedIn -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://agungwisnu-collab.github.io/jurnal-sales/">
+  <meta property="og:title" content="Studio Rekonsiliasi Jurnal &amp; Penjualan | Sistem Verifikasi Pembukuan">
+  <meta property="og:description" content="Sistem rekonsiliasi transaksi penjualan dan jurnal finance berbasis peramban mandiri: audit multi-gudang, eliminasi beban COD keliru, dan penyusunan jurnal seimbang otomatis.">
+  <meta property="og:image" content="https://agungwisnu-collab.github.io/jurnal-sales/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:locale" content="id_ID">
+  <meta property="og:site_name" content="Studio Rekonsiliasi Jurnal &amp; Penjualan">
+
+  <!-- Twitter Meta Tags -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta property="twitter:domain" content="agungwisnu-collab.github.io">
+  <meta property="twitter:url" content="https://agungwisnu-collab.github.io/jurnal-sales/">
+  <meta name="twitter:title" content="Studio Rekonsiliasi Jurnal &amp; Penjualan | Sistem Verifikasi Pembukuan">
+  <meta name="twitter:description" content="Sistem rekonsiliasi transaksi penjualan dan jurnal finance berbasis peramban mandiri: audit multi-gudang, eliminasi beban COD keliru, dan penyusunan jurnal seimbang otomatis.">
+  <meta name="twitter:image" content="https://agungwisnu-collab.github.io/jurnal-sales/og-image.png">
+
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Offline SheetJS Library -->
+  <script src="vendor/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Bar: Navigation & Compact File Ingestion Strip -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-group">
+          <div class="brand-badge">
+            <span class="status-pulse"></span>
+            <span>Pemeriksaan Mandiri</span>
+          </div>
+          <h1 class="brand-title">Studio Rekonsiliasi Jurnal &amp; Penjualan</h1>
+        </div>
+        
+        <!-- Compact File Badges -->
+        <div class="compact-files-strip">
+          <div class="file-chip" id="chip-journal" title="Klik untuk mengelola berkas Jurnal Finance">
+            <div class="chip-dot" id="dot-journal"></div>
+            <div class="chip-content">
+              <span class="chip-label">Jurnal Finance</span>
+              <span class="chip-val" id="val-journal">Belum Ada Berkas</span>
+            </div>
+            <button class="chip-btn" id="btn-open-journal-modal" type="button" title="Kelola Berkas Jurnal">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+
+          <div class="file-chip" id="chip-sales" title="Klik untuk mengelola berkas Laporan Penjualan">
+            <div class="chip-dot" id="dot-sales"></div>
+            <div class="chip-content">
+              <span class="chip-label">Laporan Sales</span>
+              <span class="chip-val" id="val-sales">Belum Ada Berkas</span>
+            </div>
+            <button class="chip-btn" id="btn-open-sales-modal" type="button" title="Kelola Berkas Sales">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Area: 1-Click Process & Utilities -->
+      <div class="header-actions">
+        <button id="btn-process-all" class="btn btn-primary btn-glow" disabled title="Jalankan normalisasi beban Bill COD dan rekonsiliasi data penjualan">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Proses &amp; Rekonsiliasi
+        </button>
+
+        <div class="menu-dropdown">
+          <button id="btn-more-options" class="btn btn-ghost btn-icon" title="Opsi Tambahan">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+          </button>
+          <div class="dropdown-menu" id="dropdown-menu">
+            <button id="btn-generate-journal" class="dropdown-item" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Buat Jurnal Seimbang Baru (Auto-Bill)
+            </button>
+            <div class="dropdown-divider"></div>
+            <button id="btn-reset-all" class="dropdown-item text-danger">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+              Bersihkan Data Memori
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area: Maximum Screen Estate Dedicated for Data Checking -->
+    <main class="main-layout">
+      <!-- Section: Metrics Cockpit (Animated Adaptive Cards) -->
+      <section class="metrics-grid" id="metrics-panel">
+        <div class="metric-card card-interactive" style="--card-delay: 0.05s;">
+          <div class="card-glow"></div>
+          <div class="metric-head">
+            <span class="metric-label">Tingkat Kecocokan</span>
+            <div class="metric-icon-bubble emerald">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+          </div>
+          <div class="metric-value-wrap">
+            <span class="metric-value text-emerald font-mono" id="metric-match-rate">0%</span>
+            <span class="metric-sub" id="metric-match-count">0 / 0 Label Cocok</span>
+          </div>
+        </div>
+
+        <div class="metric-card card-interactive" style="--card-delay: 0.1s;">
+          <div class="card-glow"></div>
+          <div class="metric-head">
+            <span class="metric-label">Total Penjualan (Sales)</span>
+            <div class="metric-icon-bubble blue">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+          </div>
+          <div class="metric-value-wrap">
+            <span class="metric-value font-mono" id="metric-sales-total" title="Rp 0">Rp 0</span>
+            <span class="metric-sub" id="metric-sales-lines">0 kelompok transaksi</span>
+          </div>
+        </div>
+
+        <div class="metric-card card-interactive" style="--card-delay: 0.15s;">
+          <div class="card-glow"></div>
+          <div class="metric-head">
+            <span class="metric-label">Debit Pembukuan (Jurnal)</span>
+            <div class="metric-icon-bubble purple">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+          </div>
+          <div class="metric-value-wrap">
+            <span class="metric-value font-mono" id="metric-journal-total" title="Rp 0">Rp 0</span>
+            <span class="metric-sub" id="metric-journal-entries">0 entri akun piutang</span>
+          </div>
+        </div>
+
+        <div class="metric-card card-interactive" style="--card-delay: 0.2s;">
+          <div class="card-glow"></div>
+          <div class="metric-head">
+            <span class="metric-label">Selisih Pembukuan</span>
+            <div class="metric-icon-bubble amber">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+          </div>
+          <div class="metric-value-wrap">
+            <span class="metric-value font-mono" id="metric-variance" title="Rp 0">Rp 0</span>
+            <span class="metric-sub" id="metric-discrepancy-count">0 transaksi berselisih</span>
+          </div>
+        </div>
+
+        <div class="metric-card card-interactive" style="--card-delay: 0.25s;">
+          <div class="card-glow"></div>
+          <div class="metric-head">
+            <span class="metric-label">Bill COD Dinormalisasi</span>
+            <div class="metric-icon-bubble rose">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </div>
+          </div>
+          <div class="metric-value-wrap">
+            <span class="metric-value text-rose font-mono" id="metric-deleted-bills">0</span>
+            <span class="metric-sub" id="metric-deleted-rows">0 baris dieliminasi</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Focused Data Workspace (Data Table First) -->
+      <section class="workspace-card" id="workspace-panel">
+        <!-- Tab Bar & Toolbar Combined -->
+        <div class="workspace-header">
+          <div class="tab-nav">
+            <button class="tab-btn active" data-tab="tab-reconcile">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
+              Hasil Rekonsiliasi (<span id="count-reconcile-tab">0</span>)
+            </button>
+            <button class="tab-btn" data-tab="tab-normalized">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+              Jurnal Finance Bersih (<span id="count-journal-tab">0</span>)
+            </button>
+            <button class="tab-btn" data-tab="tab-deleted">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              Log Bill Dieliminasi (<span id="count-deleted-tab">0</span>)
+            </button>
+            <button class="tab-btn" data-tab="tab-compare" id="tab-btn-compare" style="display: none;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+              Komparasi Jurnal (Asli vs Seimbang)
+            </button>
+          </div>
+
+          <!-- Export Actions -->
+          <div class="export-actions">
+            <button id="btn-export-reconcile" class="btn btn-sm btn-outline" title="Unduh laporan rekonsiliasi dan rincian per gudang (3 sheet)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Ekspor Rekonsiliasi
+            </button>
+            <button id="btn-export-journal" class="btn btn-sm btn-emerald" title="Unduh data jurnal finance yang telah bersih dari beban COD keliru">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Ekspor Jurnal Bersih
+            </button>
+            <button id="btn-export-generated" class="btn btn-sm btn-secondary" style="display: none;" title="Unduh jurnal baru hasil kalkulasi sales seimbang 100%">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Ekspor Jurnal Baru
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter & Search Strip -->
+        <div class="table-toolbar" id="main-table-toolbar">
+          <div class="search-wrap">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="filter-search" placeholder="Cari berdasarkan Label, SKU, Nama Produk, Kanal, atau Warehouse..." class="search-input">
+          </div>
+          <div class="filter-group">
+            <select id="filter-status" class="select-input">
+              <option value="ALL">Semua Status</option>
+              <option value="MATCHED">Hanya MATCHED &amp; MATCHED*</option>
+              <option value="DISCREPANCY">Hanya DISCREPANCY</option>
+              <option value="MISSING_IN_JOURNAL">Tidak Ada di Jurnal</option>
+            </select>
+            <select id="filter-entitas" class="select-input">
+              <option value="ALL">Semua Entitas</option>
+              <option value="FHI">Entitas FHI</option>
+              <option value="FH">Entitas FH</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Tab 1: Reconciliation Table -->
+        <div class="tab-pane active" id="tab-reconcile">
+          <div class="table-responsive">
+            <table class="data-table" id="table-reconcile">
+              <thead>
+                <tr>
+                  <th style="width: 50px;">No</th>
+                  <th style="width: 75px;">Entitas</th>
+                  <th>Journal Items / Label Produk</th>
+                  <th style="width: 140px; text-align: right;">Sales Total</th>
+                  <th style="width: 140px; text-align: right;">Jurnal Debit</th>
+                  <th style="width: 120px; text-align: right;">Selisih</th>
+                  <th style="width: 80px; text-align: right;">Qty</th>
+                  <th style="width: 180px; text-align: right;">Komposisi Jurnal (Invoices + Bill)</th>
+                  <th style="width: 110px; text-align: center;">Status</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-reconcile">
+                <tr>
+                  <td colspan="9" class="empty-state-cell">
+                    <div class="empty-state-content">
+                      <div class="empty-icon-wrap">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                      </div>
+                      <h3>Belum Ada Data yang Diproses</h3>
+                      <p>Silakan unggah berkas Jurnal Finance &amp; Sales Report melalui chip di atas, lalu tekan <strong>"Proses &amp; Rekonsiliasi"</strong>.</p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-pagination" id="pagination-reconcile" style="display: none;"></div>
+        </div>
+
+        <!-- Tab 2: Normalized Journal Table -->
+        <div class="tab-pane" id="tab-normalized">
+          <div class="table-responsive">
+            <table class="data-table" id="table-normalized">
+              <thead>
+                <tr>
+                  <th style="width: 50px;">Baris</th>
+                  <th>Partner</th>
+                  <th>Payment Type</th>
+                  <th>Journal</th>
+                  <th>Company</th>
+                  <th>Akun (Journal Items/Account)</th>
+                  <th>Label</th>
+                  <th style="width: 130px; text-align: right;">Debit</th>
+                  <th style="width: 130px; text-align: right;">Credit</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-normalized">
+                <tr><td colspan="9" class="empty-state-cell">Belum ada data jurnal yang dimuat.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-pagination" id="pagination-normalized" style="display: none;"></div>
+        </div>
+
+        <!-- Tab 3: Deleted Bills Table -->
+        <div class="tab-pane" id="tab-deleted">
+          <div class="table-responsive">
+            <table class="data-table" id="table-deleted">
+              <thead>
+                <tr>
+                  <th style="width: 60px;">Blok #</th>
+                  <th>Partner</th>
+                  <th>Payment Type</th>
+                  <th>Label Transaksi</th>
+                  <th style="width: 130px; text-align: right;">Ongkir Bersih (Debit)</th>
+                  <th style="width: 130px; text-align: right;">Biaya Promo (Debit)</th>
+                  <th style="width: 130px; text-align: right;">Utang Ongkir (Kredit)</th>
+                  <th style="width: 130px; text-align: center;">Alasan Eliminasi</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-deleted">
+                <tr><td colspan="8" class="empty-state-cell">Belum ada data normalisasi yang dijalankan.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 4: Jurnal Comparison (Asli vs Seimbang) -->
+        <div class="tab-pane" id="tab-compare">
+          <div class="compare-container">
+            <!-- Diff Summary Cards -->
+            <div class="compare-summary-grid">
+              <div class="compare-stat-card">
+                <span class="compare-stat-label">Jumlah Baris Jurnal</span>
+                <div class="compare-stat-diff">
+                  <div class="diff-chip old">
+                    <span class="diff-tag">Asli</span>
+                    <span class="diff-val" id="comp-rows-old">0</span>
+                  </div>
+                  <span class="diff-arrow">→</span>
+                  <div class="diff-chip new">
+                    <span class="diff-tag">Baru</span>
+                    <span class="diff-val text-emerald" id="comp-rows-new">0</span>
+                  </div>
+                </div>
+                <span class="compare-stat-hint" id="comp-rows-hint">Baris Bill COD keliru disingkirkan</span>
+              </div>
+
+              <div class="compare-stat-card">
+                <span class="compare-stat-label">Keseimbangan Pos Bill</span>
+                <div class="compare-stat-diff">
+                  <div class="diff-chip old">
+                    <span class="diff-tag">Asli</span>
+                    <span class="diff-val text-amber">Timpang</span>
+                  </div>
+                  <span class="diff-arrow">→</span>
+                  <div class="diff-chip new">
+                    <span class="diff-tag">Baru</span>
+                    <span class="diff-val text-emerald">Seimbang (2 Dr = 1 Cr)</span>
+                  </div>
+                </div>
+                <span class="compare-stat-hint">Piutang &amp; Promo = Utang Kurir</span>
+              </div>
+
+              <div class="compare-stat-card">
+                <span class="compare-stat-label">Total Omset &amp; Piutang</span>
+                <div class="compare-stat-diff">
+                  <div class="diff-chip old">
+                    <span class="diff-tag">Asli</span>
+                    <span class="diff-val font-mono" id="comp-omset-old" title="Rp 0">Rp 0</span>
+                  </div>
+                  <span class="diff-arrow">→</span>
+                  <div class="diff-chip new">
+                    <span class="diff-tag">Baru</span>
+                    <span class="diff-val font-mono text-emerald" id="comp-omset-new" title="Rp 0">Rp 0</span>
+                  </div>
+                </div>
+                <span class="compare-stat-hint">Sesuai 100% dengan data Sales</span>
+              </div>
+
+              <div class="compare-stat-card">
+                <span class="compare-stat-label">Status Keseimbangan (Balance)</span>
+                <div class="compare-stat-diff">
+                  <div class="diff-chip old">
+                    <span class="diff-tag">Asli</span>
+                    <span class="diff-val text-rose" id="comp-balance-old">Ada Selisih</span>
+                  </div>
+                  <span class="diff-arrow">→</span>
+                  <div class="diff-chip new">
+                    <span class="diff-tag">Baru</span>
+                    <span class="diff-val text-emerald">100% Klir (Rp 0)</span>
+                  </div>
+                </div>
+                <span class="compare-stat-hint">Debit total = Kredit total</span>
+              </div>
+            </div>
+
+            <!-- Comparison Filter Toolbar -->
+            <div class="compare-toolbar">
+              <div class="search-wrap" style="width: 360px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="filter-compare-search" placeholder="Cari transaksi pada tabel komparasi..." class="search-input">
+              </div>
+              <div class="filter-group">
+                <select id="filter-compare-mode" class="select-input">
+                  <option value="ALL">Tampilkan Semua Transaksi</option>
+                  <option value="CHANGED">Hanya Transaksi yang Dikoreksi / Dieliminasi</option>
+                  <option value="BILL_ONLY">Hanya Transaksi yang Memiliki Ongkir (Bill)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Comparison Table -->
+            <div class="table-responsive">
+              <table class="data-table" id="table-compare">
+                <thead>
+                  <tr>
+                    <th style="width: 45px;">No</th>
+                    <th style="width: 75px;">Entitas</th>
+                    <th>Label Transaksi</th>
+                    <th style="width: 140px; text-align: right;">Sales Total</th>
+                    <th style="width: 160px; text-align: center;">Jurnal Asli</th>
+                    <th style="width: 220px; text-align: center;">Jurnal Baru Seimbang</th>
+                    <th style="width: 120px; text-align: center;">Penyesuaian</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-compare">
+                  <tr><td colspan="7" class="empty-state-cell">Jalankan "Buat Jurnal Seimbang Baru" untuk mengaktifkan komparasi.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="table-pagination" id="pagination-compare" style="display: none;"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal Dialog: File Ingestion (Clean, Non-Blocking, with Real-Time Progress) -->
+    <div class="modal-backdrop" id="modal-upload" style="display: none;">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <h2 class="modal-title">Unggah &amp; Kelola Berkas</h2>
+            <p class="modal-subtitle">Pilih berkas Excel untuk diproses secara lokal di browser.</p>
+          </div>
+          <button class="modal-close-btn" id="btn-close-modal" type="button" title="Tutup">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <div class="upload-dropzone" id="dropzone-journal">
+            <div class="dropzone-icon" id="icon-journal">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <div class="dropzone-texts">
+              <div class="dropzone-title">1. Berkas Jurnal Finance</div>
+              <p class="dropzone-desc">Format Excel: <code>journal-entry-template-sales-report.xlsx</code></p>
+              <div class="dropzone-status" id="badge-journal">Belum Ada Berkas</div>
+              <div class="dropzone-progress" id="progress-journal" style="display: none;">
+                <div class="dropzone-progress-inner"></div>
+              </div>
+            </div>
+            <input type="file" id="file-journal" accept=".xlsx,.xls,.csv" class="file-input-hidden">
+            <button type="button" class="btn btn-sm btn-outline" id="btn-pick-journal" onclick="document.getElementById('file-journal').click()">Pilih Berkas</button>
+          </div>
+
+          <div class="upload-dropzone" id="dropzone-sales">
+            <div class="dropzone-icon" id="icon-sales">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            </div>
+            <div class="dropzone-texts">
+              <div class="dropzone-title">2. Berkas Transaksi Sales</div>
+              <p class="dropzone-desc">Format Excel: <code>template-sales-report.xlsx</code> / <code>DAILY SALES REPORT.xlsx</code></p>
+              <div class="dropzone-status" id="badge-sales">Belum Ada Berkas</div>
+              <div class="dropzone-progress" id="progress-sales" style="display: none;">
+                <div class="dropzone-progress-inner"></div>
+              </div>
+            </div>
+            <input type="file" id="file-sales" accept=".xlsx,.xls,.csv" class="file-input-hidden">
+            <button type="button" class="btn btn-sm btn-outline" id="btn-pick-sales" onclick="document.getElementById('file-sales').click()">Pilih Berkas</button>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-modal-cancel">Tutup</button>
+          <button type="button" class="btn btn-primary" id="btn-modal-done">Selesai</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Non-Blocking Toast Notification Center -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Sleek Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+      <div class="loading-box">
+        <div class="spinner"></div>
+        <h4 id="loading-title">Memproses Data...</h4>
+        <p id="loading-desc">Harap tunggu, komputasi berjalan di memori browser.</p>
+      </div>
+    </div>
+
+    <!-- Clean Footer (No Slop, No Rule Reference) -->
+    <footer class="app-footer">
+      <div class="footer-left">
+        <span>Studio Rekonsiliasi Jurnal &amp; Penjualan</span> &bull; 
+        <span>Pemrosesan Memori Lokal (Zero Database)</span>
+      </div>
+      <div class="footer-right">
+        <span>Pemeriksaan Jurnal Keuangan Mandiri</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

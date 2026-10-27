@@ -1,0 +1,24 @@
+# Excel & Spreadsheet Data Files (Ignored for privacy & repo size)
+*.xlsx
+*.xls
+*.csv
+*.xlsm
+*.xlsb
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor & Workspace
+.vscode/
+.idea/
+
+# Logs & Temporary files
+*.log
+*.tmp
+*.temp
+
+# Python cache (if any)
+__pycache__/
+*.pyc
