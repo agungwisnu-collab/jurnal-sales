@@ -85,8 +85,8 @@ const cleanJournalLabel = (rawLabel) => {
     if (parts.length >= 2) {
       // Bagian kiri: Hapus tanggal DD/MM/YYYY atau YYYY-MM-DD
       const left = parts[0].replace(/\s+\d{2}[/-]\d{2}[/-]\d{4}/g, '').trim();
-      // Bagian tengah: Hapus angka kuantitas di akhir string nama produk (misal: "ETA01 Etawaku 1" -> "ETA01 Etawaku")
-      const mid = parts[1].replace(/\s+\d+$/g, '').trim();
+      // Bagian tengah: Hapus kuantitas di akhir string nama produk (misal: "ETA01 Etawaku x 4" atau "ETA01 Etawaku 1" -> "ETA01 Etawaku")
+      const mid = parts[1].replace(/\s+(?:x\s+)?\d+$/i, '').trim();
       return `${left} | ${mid}`.trim();
     }
   }
@@ -388,6 +388,7 @@ function normalizeJournalData(autoHide = true) {
 
   let i = 1;
   let blockNum = 1;
+  let deletedRowsCount = 0;
 
   while (i < rows.length) {
     const row = rows[i];
@@ -400,29 +401,43 @@ function normalizeJournalData(autoHide = true) {
       const isSoscom = partnerVal.includes('SOSCOM');
       const isCod = paymentVal.includes('COD');
 
-      const rowChild1 = rows[i + 1] || [];
-      const rowChild2 = rows[i + 2] || [];
+      // Tentukan batas blok Bill secara dinamis (semua baris sampai ada entri Journal baru)
+      let nextI = i + 1;
+      while (nextI < rows.length && String(rows[nextI][journalIdx] || '').trim() === '') {
+        nextI++;
+      }
+      const blockRows = rows.slice(i, nextI);
 
       if (!isSoscom && isCod) {
         // DELETE THIS BILL BLOCK
+        let debits = [];
+        let credits = [];
+        for (const bRow of blockRows) {
+          const dr = Number(bRow[11]) || 0;
+          const cr = Number(bRow[12]) || 0;
+          if (dr > 0) debits.push(dr);
+          if (cr > 0) credits.push(cr);
+        }
+
         deleted.push({
           blockNum: blockNum++,
           partner: row[partnerIdx] || '-',
           payment: row[paymentIdx] || '-',
           label: row[9] || '-',
-          debitOngkirBersih: Number(row[11]) || 0,
-          debitPromo: Number(rowChild1[11]) || 0,
-          creditOngkir: Number(rowChild2[12]) || 0,
+          debitOngkirBersih: debits[0] || 0,
+          debitPromo: debits[1] || 0,
+          creditOngkir: credits[0] || (credits.reduce((a, b) => a + b, 0)),
           reason: 'Non-SOSCOM & COD'
         });
-        i += 3;
+        deletedRowsCount += blockRows.length;
+        i = nextI;
         continue;
       } else {
         // KEEP THIS BILL BLOCK
-        normalized.push(row);
-        if (rowChild1.length > 0) normalized.push(rowChild1);
-        if (rowChild2.length > 0) normalized.push(rowChild2);
-        i += 3;
+        for (const bRow of blockRows) {
+          normalized.push(bRow);
+        }
+        i = nextI;
         continue;
       }
     } else {
@@ -439,7 +454,7 @@ function normalizeJournalData(autoHide = true) {
 
   // Update Metrics
   if (el.metricDeletedBills) el.metricDeletedBills.textContent = formatNumber(deleted.length);
-  if (el.metricDeletedRows) el.metricDeletedRows.textContent = `${formatNumber(deleted.length * 3)} baris dieliminasi`;
+  if (el.metricDeletedRows) el.metricDeletedRows.textContent = `${formatNumber(deletedRowsCount)} baris dieliminasi`;
   if (el.countJournalTab) el.countJournalTab.textContent = formatNumber(normalized.length - 1);
   if (el.countDeletedTab) el.countDeletedTab.textContent = formatNumber(deleted.length);
 
@@ -946,25 +961,47 @@ function runReconciliation(autoHide = true) {
     const entry = journalMap.get(jKey);
 
     if (journalType.toLowerCase() === 'bill') {
-      const child1 = jRows[j + 1] || [];
-      const child2 = jRows[j + 2] || [];
-      const bDebit = debit; // Piutang Usaha / Pendapatan diterima di muka terdebit di Bill (jika ada)
-      const promoDebit = Number(child1[11]) || 0;
-      const ongkirCredit = Number(child2[12]) || 0;
+      // Tentukan batas blok Bill secara dinamis
+      let nextJ = j + 1;
+      while (nextJ < jRows.length && String(jRows[nextJ][6] || '').trim() === '') {
+        nextJ++;
+      }
+      const blockRows = jRows.slice(j, nextJ);
 
-      entry.billDebit += bDebit;
-      entry.billPromoDebit += promoDebit;
-      entry.billCredit += ongkirCredit;
-      entry.totalDebit += bDebit;
+      let bDebitSum = 0;
+      let bPromoSum = 0;
+      let bCreditSum = 0;
+
+      blockRows.forEach((bRow) => {
+        const dr = Number(bRow[11]) || 0;
+        const cr = Number(bRow[12]) || 0;
+        const acct = String(bRow[8] || '').toLowerCase();
+
+        if (dr > 0) {
+          if (acct.includes('promo') || acct.includes('biaya')) {
+            bPromoSum += dr;
+          } else {
+            bDebitSum += dr;
+          }
+        }
+        if (cr > 0) {
+          bCreditSum += cr;
+        }
+      });
+
+      entry.billDebit += bDebitSum;
+      entry.billPromoDebit += bPromoSum;
+      entry.billCredit += bCreditSum;
+      entry.totalDebit += bDebitSum;
       entry.billsCount = (entry.billsCount || 0) + 1;
 
-      // Cek keseimbangan internal baris Bill (Dr1 + Dr2 == Cr3)
-      const billDrSum = bDebit + promoDebit;
-      if (Math.abs(billDrSum - ongkirCredit) > 0.05) {
+      // Cek keseimbangan internal baris Bill (Dr_total == Cr_total)
+      const billDrSum = bDebitSum + bPromoSum;
+      if (Math.abs(billDrSum - bCreditSum) > 0.05) {
         entry.unbalancedBillsCount = (entry.unbalancedBillsCount || 0) + 1;
       }
 
-      j += 3;
+      j = nextJ;
       continue;
     } else {
       const isInvoice = journalType.toLowerCase().includes('invoice');
