@@ -937,7 +937,9 @@ function runReconciliation(autoHide = true) {
         billDebit: 0,
         billPromoDebit: 0,
         billCredit: 0,
-        entriesCount: 0
+        entriesCount: 0,
+        billsCount: 0,
+        unbalancedBillsCount: 0
       });
     }
 
@@ -946,7 +948,7 @@ function runReconciliation(autoHide = true) {
     if (journalType.toLowerCase() === 'bill') {
       const child1 = jRows[j + 1] || [];
       const child2 = jRows[j + 2] || [];
-      const bDebit = debit; // Piutang Usaha terdebit di Bill (jika ada)
+      const bDebit = debit; // Piutang Usaha / Pendapatan diterima di muka terdebit di Bill (jika ada)
       const promoDebit = Number(child1[11]) || 0;
       const ongkirCredit = Number(child2[12]) || 0;
 
@@ -954,6 +956,13 @@ function runReconciliation(autoHide = true) {
       entry.billPromoDebit += promoDebit;
       entry.billCredit += ongkirCredit;
       entry.totalDebit += bDebit;
+      entry.billsCount = (entry.billsCount || 0) + 1;
+
+      // Cek keseimbangan internal baris Bill (Dr1 + Dr2 == Cr3)
+      const billDrSum = bDebit + promoDebit;
+      if (Math.abs(billDrSum - ongkirCredit) > 0.05) {
+        entry.unbalancedBillsCount = (entry.unbalancedBillsCount || 0) + 1;
+      }
 
       j += 3;
       continue;
@@ -973,10 +982,11 @@ function runReconciliation(autoHide = true) {
     }
   }
 
-  // C. Reconcile Matches & Variances (Pilihan 1: Basis Omset Faktur Barang - Apple to Apple)
+  // C. Reconcile Matches & Variances (Dual-Layer Audit: Faktur Omset + Keseimbangan Bill)
   const results = [];
   let matchedCount = 0;
   let discrepancyCount = 0;
+  let billUnbalancedCount = 0;
   let totalSalesVal = 0;
   let totalJournalVal = 0;
   let totalVarianceVal = 0;
@@ -991,20 +1001,32 @@ function runReconciliation(autoHide = true) {
     const billPromoDebit = jMatch ? jMatch.billPromoDebit : 0;
     const billCredit = jMatch ? jMatch.billCredit : 0;
     const journalEntriesCount = jMatch ? jMatch.entriesCount : 0;
-    
+    const billsCount = jMatch ? (jMatch.billsCount || 0) : 0;
+    const unbalancedBillsCount = jMatch ? (jMatch.unbalancedBillsCount || 0) : 0;
+
     // Perbandingan Apple-to-Apple: Omset Faktur Barang (Invoices Debit)
     totalJournalVal += invoicesDebit;
 
+    // Layer 1: Validasi Faktur Barang
     const diff = Math.abs(sData.totalPerline - invoicesDebit);
-    const isMatched = jMatch && diff <= 0.05;
+    const isInvoiceMatched = jMatch && diff <= 0.05;
+
+    // Layer 2: Validasi Keseimbangan Jurnal Bill Ekspedisi
+    const hasBills = billsCount > 0;
+    const totalBillDr = billDebit + billPromoDebit;
+    const isBillInternallyBalanced = !hasBills || (Math.abs(totalBillDr - billCredit) <= 0.05 && unbalancedBillsCount === 0);
+    const billImbalance = Math.abs(totalBillDr - billCredit);
 
     let status = 'MATCHED';
     if (!jMatch) {
       status = 'MISSING_IN_JOURNAL';
-    } else if (!isMatched) {
+    } else if (!isInvoiceMatched) {
       status = 'DISCREPANCY';
       discrepancyCount++;
       totalVarianceVal += diff;
+    } else if (!isBillInternallyBalanced) {
+      status = 'BILL_UNBALANCED';
+      billUnbalancedCount++;
     } else {
       matchedCount++;
       if (journalEntriesCount > 1 || sData.warehouses.size > 1) {
@@ -1019,7 +1041,6 @@ function runReconciliation(autoHide = true) {
     const grossOngkir = Number(sData.ongkir) || 0;
     const discOngkir = Number(sData.discountOngkir) || 0;
     const netOngkir = grossOngkir - discOngkir;
-    const isBillBalanced = Math.abs((netOngkir + discOngkir) - grossOngkir) <= 0.01;
 
     results.push({
       id: groupKey,
@@ -1032,13 +1053,17 @@ function runReconciliation(autoHide = true) {
       billDebit: billDebit,
       billPromoDebit: billPromoDebit,
       billCredit: billCredit,
+      billsCount: billsCount,
+      unbalancedBillsCount: unbalancedBillsCount,
+      isBillInternallyBalanced: isBillInternallyBalanced,
+      billImbalance: billImbalance,
       journalEntriesCount: journalEntriesCount,
       variance: sData.totalPerline - invoicesDebit,
       quantity: sData.quantity,
       ongkirGross: grossOngkir,
       discOngkir: discOngkir,
       netOngkir: netOngkir,
-      isBillBalanced: isBillBalanced,
+      isBillBalanced: isBillInternallyBalanced,
       warehouses: whList,
       status: status
     });
@@ -1069,7 +1094,18 @@ function runReconciliation(autoHide = true) {
     el.metricVariance.textContent = formatCurrency(totalVarianceVal);
     el.metricVariance.title = formatCurrency(totalVarianceVal);
   }
-  if (el.metricDiscrepancyCount) el.metricDiscrepancyCount.textContent = `${formatNumber(discrepancyCount)} transaksi berselisih`;
+  if (el.metricDiscrepancyCount) {
+    if (billUnbalancedCount > 0 && discrepancyCount === 0) {
+      el.metricDiscrepancyCount.textContent = `${formatNumber(billUnbalancedCount)} Bill tidak seimbang`;
+      el.metricDiscrepancyCount.style.color = 'var(--accent-rose)';
+    } else if (billUnbalancedCount > 0 && discrepancyCount > 0) {
+      el.metricDiscrepancyCount.textContent = `${formatNumber(discrepancyCount)} berselisih, ${formatNumber(billUnbalancedCount)} Bill tidak seimbang`;
+      el.metricDiscrepancyCount.style.color = 'var(--accent-rose)';
+    } else {
+      el.metricDiscrepancyCount.textContent = `${formatNumber(discrepancyCount)} transaksi berselisih`;
+      el.metricDiscrepancyCount.style.color = '';
+    }
+  }
 
   if (el.countReconcileTab) el.countReconcileTab.textContent = formatNumber(results.length);
 
@@ -1167,6 +1203,7 @@ function renderReconcileTable() {
 
     let badgeClass = 'badge-matched';
     if (row.status === 'DISCREPANCY') badgeClass = 'badge-discrepancy';
+    if (row.status === 'BILL_UNBALANCED') badgeClass = 'badge-bill-unbalanced';
     if (row.status.includes('MISSING')) badgeClass = 'badge-missing';
 
     const whCount = row.warehouses.length;
@@ -1178,12 +1215,21 @@ function renderReconcileTable() {
     let compositionHtml = '';
     if (!row.journalDebit || row.status === 'MISSING_IN_JOURNAL') {
       compositionHtml = `<span style="color:var(--text-muted); font-size:11px;">Belum Ada Jurnal</span>`;
-    } else if (row.billDebit > 0) {
+    } else if (!row.isBillInternallyBalanced) {
       compositionHtml = `
         <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px; font-size:11px;">
           <span style="color:var(--text-primary); font-weight:600;">Inv: ${formatCurrency(row.invoicesDebit)}</span>
-          <span style="color:var(--accent-amber); font-size:10px; background:rgba(217, 119, 6, 0.08); padding:1px 6px; border-radius:4px;" title="Beban Bill didebitkan ke Piutang Usaha">
-            + Bill: ${formatCurrency(row.billDebit)}
+          <span style="color:var(--accent-rose); font-size:10px; background:rgba(239, 68, 68, 0.08); padding:1px 6px; border-radius:4px; font-weight:600;" title="Debit Bill (${formatCurrency(row.billDebit + row.billPromoDebit)}) ≠ Kredit Bill (${formatCurrency(row.billCredit)})">
+            ⚠ Bill Out-of-Balance
+          </span>
+        </div>
+      `;
+    } else if (row.billDebit > 0 || row.billCredit > 0) {
+      compositionHtml = `
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px; font-size:11px;">
+          <span style="color:var(--text-primary); font-weight:600;">Inv: ${formatCurrency(row.invoicesDebit)}</span>
+          <span style="color:var(--accent-emerald); font-size:10px; background:rgba(5, 150, 105, 0.08); padding:1px 6px; border-radius:4px;" title="Bill Seimbang: Debit ${formatCurrency(row.billDebit + row.billPromoDebit)} = Kredit ${formatCurrency(row.billCredit)}">
+            ✓ Bill Seimbang (${formatCurrency(row.billCredit)})
           </span>
         </div>
       `;
@@ -1256,25 +1302,25 @@ function renderReconcileTable() {
         `;
       }).join('');
 
-      // Root-cause Audit Diagnosis (Compact & Crisp)
+      // Root-cause Audit Diagnosis (Dual-Layer)
       let alertClass = 'alert-clean';
       let auditExplanation = '';
 
       if (row.status === 'MISSING_IN_JOURNAL') {
         alertClass = 'alert-danger';
         auditExplanation = '<strong>Transaksi Belum Tercatat:</strong> Belum ditemukan faktur untuk transaksi ini di berkas Jurnal Finance.';
-      } else if (Math.abs(row.variance) <= 0.05 && row.billDebit === 0) {
-        alertClass = 'alert-clean';
-        auditExplanation = '<strong>Status Klop 100%:</strong> Omset Sales Report dan Debit Faktur Jurnal selaras sempurna tanpa komponen beban Bill.';
-      } else if (Math.abs(row.variance) <= 0.05 && row.billDebit > 0) {
-        alertClass = 'alert-clean';
-        auditExplanation = `<strong>Status Klop 100% (Faktur Barang):</strong> Omset Sales Report (${formatCurrency(row.salesTotal)}) dan Debit Faktur Jurnal (${formatCurrency(row.invoicesDebit)}) selaras sempurna. Komponen logistik pada Bill (+${formatCurrency(row.billDebit)}) tercatat rapi pada jurnal ekspedisi terpisah.`;
-      } else if (Math.abs(row.variance) > 0.05 && row.billDebit > 0) {
+      } else if (row.status === 'BILL_UNBALANCED') {
         alertClass = 'alert-danger';
-        auditExplanation = `<strong>Akar Selisih:</strong> Terdapat selisih faktur barang <strong>${formatCurrency(row.variance)}</strong> dibanding faktur Invoices di Jurnal (komponen Bill: +${formatCurrency(row.billDebit)}).`;
+        auditExplanation = `<strong>Audit Layer 2 Gagal (Bill Tidak Seimbang):</strong> Faktur omset barang 100% klop (${formatCurrency(row.invoicesDebit)}), namun blok Bill logistik di jurnal <strong>TIDAK SEIMBANG</strong> (Total Debit ${formatCurrency(row.billDebit + row.billPromoDebit)} ≠ Kredit ${formatCurrency(row.billCredit)}, selisih ${formatCurrency(row.billImbalance)}). Rumus blok Bill perlu diperbaiki.`;
+      } else if (Math.abs(row.variance) <= 0.05 && (row.billDebit > 0 || row.billCredit > 0)) {
+        alertClass = 'alert-clean';
+        auditExplanation = `<strong>Audit Dual-Layer Lolos (100% Klop):</strong> Layer 1 Omset Faktur Barang (${formatCurrency(row.invoicesDebit)}) dan Layer 2 Keseimbangan Bill (${formatCurrency(row.billCredit)}) keduanya selaras sempurna.`;
+      } else if (Math.abs(row.variance) <= 0.05) {
+        alertClass = 'alert-clean';
+        auditExplanation = '<strong>Audit Dual-Layer Lolos (100% Klop):</strong> Omset Sales Report dan Debit Faktur Jurnal selaras sempurna tanpa komponen tambahan pada Bill.';
       } else {
         alertClass = 'alert-danger';
-        auditExplanation = `<strong>Akar Selisih:</strong> Nilai penjualan pada Sales Report berselisih <strong>${formatCurrency(row.variance)}</strong> dibanding faktur Invoices di Jurnal.`;
+        auditExplanation = `<strong>Audit Layer 1 Gagal (Faktur Berselisih):</strong> Nilai penjualan pada Sales Report berselisih <strong>${formatCurrency(row.variance)}</strong> dibanding faktur Invoices di Jurnal.`;
       }
 
       subTr.innerHTML = `
@@ -1291,23 +1337,13 @@ function renderReconcileTable() {
               </div>
               <div class="audit-kpi-strip font-mono">
                 <div class="kpi-item">
-                  <span class="kpi-label">Sales Report</span>
-                  <span class="kpi-val">${formatCurrency(row.salesTotal)}</span>
-                </div>
-                <div class="kpi-sep">&rarr;</div>
-                <div class="kpi-item">
                   <span class="kpi-label">Faktur (Invoices)</span>
                   <span class="kpi-val">${formatCurrency(row.invoicesDebit)}</span>
                 </div>
-                <div class="kpi-sep">+</div>
-                <div class="kpi-item ${row.billDebit > 0 ? 'highlight-amber' : ''}">
-                  <span class="kpi-label">Beban Bill</span>
-                  <span class="kpi-val">${row.billDebit > 0 ? `+${formatCurrency(row.billDebit)}` : 'Rp 0'}</span>
-                </div>
-                <div class="kpi-sep">=</div>
-                <div class="kpi-item">
-                  <span class="kpi-label">Total Debit Jurnal</span>
-                  <span class="kpi-val" style="color:var(--accent-indigo);">${formatCurrency(row.totalDebit)}</span>
+                <div class="kpi-sep">&bull;</div>
+                <div class="kpi-item ${row.isBillInternallyBalanced ? 'highlight-clean' : 'highlight-variance'}">
+                  <span class="kpi-label">Status Jurnal Bill</span>
+                  <span class="kpi-val">${row.billsCount === 0 ? 'Tanpa Bill' : (row.isBillInternallyBalanced ? '✓ Seimbang' : `⚠ Selisih ${formatCurrency(row.billImbalance)}`)}</span>
                 </div>
                 <div class="kpi-sep">&bull;</div>
                 <div class="kpi-item ${Math.abs(row.variance) > 0.05 ? 'highlight-variance' : 'highlight-clean'}">

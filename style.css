@@ -823,6 +823,12 @@ body {
   border: 1px solid #fecaca;
 }
 
+.badge-bill-unbalanced {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+}
+
 /* Table Pagination */
 .table-pagination {
   display: flex;
