@@ -70,6 +70,35 @@ const escapeHtml = (str) => {
     .replace(/'/g, '&#039;');
 };
 
+/**
+ * Normalisasi Adaptif Label Jurnal
+ * Mendukung format lama: "{Partner} {Metode} | {SKU} {Product}"
+ * Dan format baru koma: "{Partner} {Date} {Payment} , {SKU} {Product} {Qty} , {Warehouse}"
+ */
+const cleanJournalLabel = (rawLabel) => {
+  let lbl = String(rawLabel || '').trim();
+  if (!lbl) return '';
+
+  // 1. Format Baru dengan Koma: "{Partner} {Date} {Payment} , {SKU} {Product} {Qty} , {Warehouse}"
+  if (lbl.includes(' , ')) {
+    const parts = lbl.split(' , ').map(p => p.trim());
+    if (parts.length >= 2) {
+      // Bagian kiri: Hapus tanggal DD/MM/YYYY atau YYYY-MM-DD
+      const left = parts[0].replace(/\s+\d{2}[/-]\d{2}[/-]\d{4}/g, '').trim();
+      // Bagian tengah: Hapus angka kuantitas di akhir string nama produk (misal: "ETA01 Etawaku 1" -> "ETA01 Etawaku")
+      const mid = parts[1].replace(/\s+\d+$/g, '').trim();
+      return `${left} | ${mid}`.trim();
+    }
+  }
+
+  // 2. Format Lama dengan Pipe: Bersihkan penanda gudang di akhir jika ada
+  lbl = lbl.replace(/\s*\|\s*Jakarta/gi, '')
+           .replace(/\s*\|\s*Surabaya/gi, '')
+           .trim();
+
+  return lbl;
+};
+
 // DOM Elements
 const el = {
   // Modal & Chips
@@ -445,6 +474,7 @@ function generateBalancedJournal() {
     const colOngkir = sHeaders.indexOf('Ongkir');
     const colDiscOngkir = sHeaders.indexOf('DiscountOngkir');
     const colShipping = sHeaders.indexOf('ShippingFee');
+    const colStatus = sHeaders.indexOf('Status');
 
     // Group By: Entitas, Kanal, Group, Metode, SKU, Product, Warehouse
     const aggMap = new Map();
@@ -452,6 +482,14 @@ function generateBalancedJournal() {
     for (let r = 1; r < sRows.length; r++) {
       const row = sRows[r];
       if (!row || row.length === 0) continue;
+
+      // Filter status pesanan: hanya proses yang sukses (Success & Success DFOD), abaikan retur (Return Putaway)
+      if (colStatus !== -1) {
+        const st = String(row[colStatus] || '').trim().toLowerCase();
+        if (st && !st.includes('success')) {
+          continue;
+        }
+      }
 
       const entitas = String(row[colEntitas] || 'FHI').trim();
       const kanal = String(row[colKanal] || '').trim();
@@ -520,7 +558,13 @@ function generateBalancedJournal() {
         else if (item.group.toUpperCase().includes('AKUISISI')) revenueAccount = '40100003 Pendapatan Akuisisi';
         else if (item.group.toUpperCase().includes('COMMERCE')) revenueAccount = '40100012 Pendapatan Web Commerce';
       } else if (item.kanal.toUpperCase().includes('TIKTOK')) {
-        revenueAccount = '40100006 Pendapatan Tiktok';
+        if (partnerName.toUpperCase().includes('GRASON')) {
+          revenueAccount = '4010022 Pendapatan Tiktok-GRASON';
+        } else {
+          revenueAccount = '40100006 Pendapatan Tiktok';
+        }
+      } else if (partnerName.toUpperCase().includes('GRASON')) {
+        revenueAccount = '4010021 Pendapatan MP-GRASON';
       }
 
       // 1. Invoices Block
@@ -535,16 +579,17 @@ function generateBalancedJournal() {
         revenueAccount, baseLabel, analyticGroup, '', item.total
       ]);
 
-      // 2. Inventory Valuation Block
+      // 2. Inventory Valuation Block (HPP LIN01 @ Rp 90.000)
+      const invVal = item.sku === 'LIN01' ? item.quantity * 90000 : 0;
       generatedRows.push([
         partnerName, baseLabel, analyticGroup, partnerName, '',
         item.metode, `[${item.entitas}] Inventory Valuation`, companyName,
-        '10130001 Persediaan Barang Dagang', baseLabel, analyticGroup, 0, ''
+        '10130001 Persediaan Barang Dagang', baseLabel, analyticGroup, invVal, ''
       ]);
       generatedRows.push([
         '', '', '', '', '',
         '', '', '',
-        '50100001 Harga Pokok Penjualan - Internal', baseLabel, analyticGroup, '', 0
+        '50100001 Harga Pokok Penjualan - Internal', baseLabel, analyticGroup, '', invVal
       ]);
 
       // 3. Bill Block (2 Debit + 1 Credit)
@@ -563,9 +608,19 @@ function generateBalancedJournal() {
       }
 
       let promoAccount = '60130130 Biaya Promo MP';
-      if (item.kanal.toUpperCase().includes('TIKTOK')) promoAccount = '60140012 Biaya Promo Tiktok';
-      else if (item.group.toUpperCase().includes('CRM')) promoAccount = '60120003 Biaya Promo CRM';
-      else if (item.group.toUpperCase().includes('AKUISISI')) promoAccount = '60110090 Biaya Promo Akuisisi';
+      if (partnerName.toUpperCase().includes('GRASON')) {
+        if (item.kanal.toUpperCase().includes('TIKTOK')) {
+          promoAccount = '60191412 Biaya Promo Tiktok-Grason';
+        } else {
+          promoAccount = '60191313 Biaya Promo MP-Grason';
+        }
+      } else if (item.kanal.toUpperCase().includes('TIKTOK')) {
+        promoAccount = '60140012 Biaya Promo Tiktok';
+      } else if (item.group.toUpperCase().includes('CRM')) {
+        promoAccount = '60120003 Biaya Promo CRM';
+      } else if (item.group.toUpperCase().includes('AKUISISI')) {
+        promoAccount = '60110090 Biaya Promo Akuisisi';
+      }
 
       const headerAccount = isSoscom ? '20160001 Pendapatan diterima di muka' : '10140101 Piutang Usaha';
 
@@ -776,6 +831,7 @@ function runReconciliation(autoHide = true) {
   const colOngkir = sHeaders.indexOf('Ongkir');
   const colDiscOngkir = sHeaders.indexOf('DiscountOngkir');
   const colShipping = sHeaders.indexOf('ShippingFee');
+  const colStatus = sHeaders.indexOf('Status');
 
   // Grouping: Key = (Entitas, Label)
   const salesGrouped = new Map();
@@ -783,6 +839,14 @@ function runReconciliation(autoHide = true) {
   for (let r = 1; r < sRows.length; r++) {
     const row = sRows[r];
     if (!row || row.length === 0) continue;
+
+    // Filter status pesanan: hanya proses yang sukses (Success & Success DFOD), abaikan retur (Return Putaway)
+    if (colStatus !== -1) {
+      const st = String(row[colStatus] || '').trim().toLowerCase();
+      if (st && !st.includes('success')) {
+        continue;
+      }
+    }
 
     const entitas = String(row[colEntitas] || '').trim();
     const kanal = String(row[colKanal] || '').trim();
@@ -853,7 +917,7 @@ function runReconciliation(autoHide = true) {
     const row = jRows[j];
     const journalType = String(row[6] || '').trim();
     const company = String(row[7] || '').trim();
-    let label = String(row[9] || '').trim();
+    let label = cleanJournalLabel(row[9]);
     const debit = Number(row[11]) || 0;
     const account = String(row[8] || '').trim();
 
@@ -863,9 +927,6 @@ function runReconciliation(autoHide = true) {
     } else if (company.toLowerCase().includes('family herbal')) {
       entitasCode = 'FH';
     }
-
-    if (label.includes(' | Jakarta')) label = label.replace(' | Jakarta', '').trim();
-    if (label.includes(' | Surabaya')) label = label.replace(' | Surabaya', '').trim();
 
     const jKey = `${entitasCode}:::${label}`;
 
@@ -885,7 +946,7 @@ function runReconciliation(autoHide = true) {
     if (journalType.toLowerCase() === 'bill') {
       const child1 = jRows[j + 1] || [];
       const child2 = jRows[j + 2] || [];
-      const bDebit = debit; // Piutang Usaha terdebit di Bill
+      const bDebit = debit; // Piutang Usaha terdebit di Bill (jika ada)
       const promoDebit = Number(child1[11]) || 0;
       const ongkirCredit = Number(child2[12]) || 0;
 
@@ -897,7 +958,11 @@ function runReconciliation(autoHide = true) {
       j += 3;
       continue;
     } else {
-      if (journalType.toLowerCase().includes('invoice') || account.includes('Piutang Usaha') || account.includes('Pendapatan MP')) {
+      const isInvoice = journalType.toLowerCase().includes('invoice');
+      const isPiutang = account.includes('Piutang'); // mencakup 10140101 Piutang Usaha & 10140201 Piutang Pihak Usaha
+      const isRevenue = account.includes('Pendapatan');
+
+      if (isInvoice || isPiutang || isRevenue) {
         if (debit > 0) {
           entry.invoicesDebit += debit;
           entry.totalDebit += debit;
