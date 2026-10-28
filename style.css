@@ -900,16 +900,18 @@ body {
 }
 
 .reconcile-sub-row td {
-  padding: 0 16px 16px 16px !important;
+  padding: 4px 14px 10px 14px !important;
   background: #f8fafc !important;
   border-bottom: 2px solid var(--border-medium) !important;
+  white-space: normal !important;
 }
 
 .breakdown-dual-layout {
   display: grid;
-  grid-template-columns: 1.15fr 1fr;
-  gap: 16px;
-  margin-top: 6px;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 4px;
+  white-space: normal;
 }
 
 @media (max-width: 1024px) {
@@ -922,28 +924,28 @@ body {
   background: #ffffff;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 12px 14px;
+  padding: 8px 12px;
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .audit-card-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-secondary);
-  padding-bottom: 6px;
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .audit-icon {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 /* Compact Horizontal Equation / KPI Strip */
@@ -954,18 +956,18 @@ body {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  gap: 8px;
+  padding: 5px 10px;
+  gap: 6px;
 }
 
 .kpi-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .kpi-label {
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -973,13 +975,13 @@ body {
 }
 
 .kpi-val {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .kpi-sep {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-muted);
   user-select: none;
@@ -1001,7 +1003,7 @@ body {
 @media (max-width: 640px) {
   .audit-kpi-strip {
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
   }
   .kpi-sep {
     display: none;
@@ -1009,10 +1011,11 @@ body {
 }
 
 .audit-summary-alert {
-  padding: 8px 12px;
+  padding: 5px 10px;
   border-radius: var(--radius-sm);
-  font-size: 11.5px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .audit-summary-alert.alert-clean {
@@ -1034,7 +1037,7 @@ body {
 }
 
 .journal-match-note {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--accent-emerald);
   font-weight: 600;
   text-transform: none;
@@ -1042,38 +1045,38 @@ body {
 
 .wh-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
 }
 
 .wh-item-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 12px 14px;
+  padding: 6px 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
 }
 
 .wh-item-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12.5px;
+  font-size: 11.5px;
   color: var(--text-primary);
 }
 
 .wh-icon {
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .wh-item-stats {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
 /* ==========================================================================

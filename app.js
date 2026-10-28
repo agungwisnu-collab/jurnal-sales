@@ -1276,16 +1276,9 @@ function renderReconcileTable() {
         const whDisc = Number(wh.discountOngkir) || 0;
         const whNet = whGross - whDisc;
 
-        let ongkirInfo = '';
-        if (whGross > 0 || whDisc > 0) {
-          ongkirInfo = `<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">
-            Ongkir: ${formatCurrency(whNet)} + Disc: ${formatCurrency(whDisc)} = ${formatCurrency(whGross)}
-          </div>`;
-        } else {
-          ongkirInfo = `<div style="font-size:11px; color:var(--text-muted); margin-top:2px; font-style:italic;">
-            Beban ongkir diproses marketplace
-          </div>`;
-        }
+        const ongkirInfo = (whGross > 0 || whDisc > 0)
+          ? `<div style="font-size:10px; color:var(--text-secondary); margin-top:1px;">Ongkir: ${formatCurrency(whNet)} + Disc: ${formatCurrency(whDisc)}</div>`
+          : '';
 
         return `
           <div class="wh-item-card">
@@ -1294,33 +1287,32 @@ function renderReconcileTable() {
               <strong>${escapeHtml(wh.name)}</strong>
             </div>
             <div class="wh-item-stats font-mono">
-              <div>Omset: <strong>${formatCurrency(wh.total)}</strong></div>
-              <div>Qty: ${formatNumber(wh.quantity)} pcs</div>
+              <div>Omset: <strong>${formatCurrency(wh.total)}</strong> <span style="color:var(--text-muted); font-size:10.5px;">(${formatNumber(wh.quantity)} pcs)</span></div>
               ${ongkirInfo}
             </div>
           </div>
         `;
       }).join('');
 
-      // Root-cause Audit Diagnosis (Dual-Layer)
+      // Root-cause Audit Diagnosis (Ultra-Compact)
       let alertClass = 'alert-clean';
       let auditExplanation = '';
 
       if (row.status === 'MISSING_IN_JOURNAL') {
         alertClass = 'alert-danger';
-        auditExplanation = '<strong>Transaksi Belum Tercatat:</strong> Belum ditemukan faktur untuk transaksi ini di berkas Jurnal Finance.';
+        auditExplanation = '<strong>Belum Tercatat:</strong> Faktur belum ditemukan di Jurnal Finance.';
       } else if (row.status === 'BILL_UNBALANCED') {
         alertClass = 'alert-danger';
-        auditExplanation = `<strong>Audit Layer 2 Gagal (Bill Tidak Seimbang):</strong> Faktur omset barang 100% klop (${formatCurrency(row.invoicesDebit)}), namun blok Bill logistik di jurnal <strong>TIDAK SEIMBANG</strong> (Total Debit ${formatCurrency(row.billDebit + row.billPromoDebit)} ≠ Kredit ${formatCurrency(row.billCredit)}, selisih ${formatCurrency(row.billImbalance)}). Rumus blok Bill perlu diperbaiki.`;
+        auditExplanation = `<strong>Bill Out-of-Balance:</strong> Faktur klop (${formatCurrency(row.invoicesDebit)}), namun Bill selisih <strong>${formatCurrency(row.billImbalance)}</strong> (Dr ${formatCurrency(row.billDebit + row.billPromoDebit)} ≠ Cr ${formatCurrency(row.billCredit)}).`;
       } else if (Math.abs(row.variance) <= 0.05 && (row.billDebit > 0 || row.billCredit > 0)) {
         alertClass = 'alert-clean';
-        auditExplanation = `<strong>Audit Dual-Layer Lolos (100% Klop):</strong> Layer 1 Omset Faktur Barang (${formatCurrency(row.invoicesDebit)}) dan Layer 2 Keseimbangan Bill (${formatCurrency(row.billCredit)}) keduanya selaras sempurna.`;
+        auditExplanation = `<strong>Dual-Layer Klop:</strong> Faktur ${formatCurrency(row.invoicesDebit)} &amp; Bill ${formatCurrency(row.billCredit)} seimbang sempurna.`;
       } else if (Math.abs(row.variance) <= 0.05) {
         alertClass = 'alert-clean';
-        auditExplanation = '<strong>Audit Dual-Layer Lolos (100% Klop):</strong> Omset Sales Report dan Debit Faktur Jurnal selaras sempurna tanpa komponen tambahan pada Bill.';
+        auditExplanation = `<strong>Faktur Klop 100%:</strong> Omset Sales &amp; Debit Jurnal selaras (${formatCurrency(row.invoicesDebit)}).`;
       } else {
         alertClass = 'alert-danger';
-        auditExplanation = `<strong>Audit Layer 1 Gagal (Faktur Berselisih):</strong> Nilai penjualan pada Sales Report berselisih <strong>${formatCurrency(row.variance)}</strong> dibanding faktur Invoices di Jurnal.`;
+        auditExplanation = `<strong>Selisih Faktur:</strong> Sales berselisih <strong>${formatCurrency(row.variance)}</strong> dibanding Jurnal.`;
       }
 
       subTr.innerHTML = `
