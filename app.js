@@ -973,7 +973,7 @@ function runReconciliation(autoHide = true) {
     }
   }
 
-  // C. Reconcile Matches & Variances
+  // C. Reconcile Matches & Variances (Pilihan 1: Basis Omset Faktur Barang - Apple to Apple)
   const results = [];
   let matchedCount = 0;
   let discrepancyCount = 0;
@@ -985,15 +985,17 @@ function runReconciliation(autoHide = true) {
     totalSalesVal += sData.totalPerline;
 
     const jMatch = journalMap.get(groupKey);
-    const journalDebit = jMatch ? jMatch.totalDebit : 0;
+    const totalDebitCombined = jMatch ? jMatch.totalDebit : 0;
     const invoicesDebit = jMatch ? jMatch.invoicesDebit : 0;
     const billDebit = jMatch ? jMatch.billDebit : 0;
     const billPromoDebit = jMatch ? jMatch.billPromoDebit : 0;
     const billCredit = jMatch ? jMatch.billCredit : 0;
     const journalEntriesCount = jMatch ? jMatch.entriesCount : 0;
-    totalJournalVal += journalDebit;
+    
+    // Perbandingan Apple-to-Apple: Omset Faktur Barang (Invoices Debit)
+    totalJournalVal += invoicesDebit;
 
-    const diff = Math.abs(sData.totalPerline - journalDebit);
+    const diff = Math.abs(sData.totalPerline - invoicesDebit);
     const isMatched = jMatch && diff <= 0.05;
 
     let status = 'MATCHED';
@@ -1024,13 +1026,14 @@ function runReconciliation(autoHide = true) {
       entitas: sData.entitas,
       label: sData.label,
       salesTotal: sData.totalPerline,
-      journalDebit: journalDebit,
+      journalDebit: invoicesDebit, // Ditampilkan di kolom 'Nilai Jurnal' sebagai pembanding omset faktur
+      totalDebit: totalDebitCombined, // Total debit gabungan (faktur + bill) jika ada
       invoicesDebit: invoicesDebit,
       billDebit: billDebit,
       billPromoDebit: billPromoDebit,
       billCredit: billCredit,
       journalEntriesCount: journalEntriesCount,
-      variance: sData.totalPerline - journalDebit,
+      variance: sData.totalPerline - invoicesDebit,
       quantity: sData.quantity,
       ongkirGross: grossOngkir,
       discOngkir: discOngkir,
@@ -1254,7 +1257,6 @@ function renderReconcileTable() {
       }).join('');
 
       // Root-cause Audit Diagnosis (Compact & Crisp)
-      const salesVsInvDiff = row.salesTotal - row.invoicesDebit;
       let alertClass = 'alert-clean';
       let auditExplanation = '';
 
@@ -1263,13 +1265,13 @@ function renderReconcileTable() {
         auditExplanation = '<strong>Transaksi Belum Tercatat:</strong> Belum ditemukan faktur untuk transaksi ini di berkas Jurnal Finance.';
       } else if (Math.abs(row.variance) <= 0.05 && row.billDebit === 0) {
         alertClass = 'alert-clean';
-        auditExplanation = '<strong>Status Klop 100%:</strong> Omset Sales Report dan Debit Faktur Jurnal selaras sempurna tanpa distorsi beban Bill.';
-      } else if (Math.abs(salesVsInvDiff) <= 0.05 && row.billDebit > 0) {
-        alertClass = 'alert-warning';
-        auditExplanation = `<strong>Akar Selisih:</strong> Faktur barang murni 100% klop (${formatCurrency(row.invoicesDebit)}). Selisih <strong>${formatCurrency(Math.abs(row.variance))}</strong> murni berasal dari beban Bill yang didebitkan ke akun Piutang Usaha pada jurnal lama.`;
-      } else if (Math.abs(salesVsInvDiff) > 0.05 && row.billDebit > 0) {
+        auditExplanation = '<strong>Status Klop 100%:</strong> Omset Sales Report dan Debit Faktur Jurnal selaras sempurna tanpa komponen beban Bill.';
+      } else if (Math.abs(row.variance) <= 0.05 && row.billDebit > 0) {
+        alertClass = 'alert-clean';
+        auditExplanation = `<strong>Status Klop 100% (Faktur Barang):</strong> Omset Sales Report (${formatCurrency(row.salesTotal)}) dan Debit Faktur Jurnal (${formatCurrency(row.invoicesDebit)}) selaras sempurna. Komponen logistik pada Bill (+${formatCurrency(row.billDebit)}) tercatat rapi pada jurnal ekspedisi terpisah.`;
+      } else if (Math.abs(row.variance) > 0.05 && row.billDebit > 0) {
         alertClass = 'alert-danger';
-        auditExplanation = `<strong>Akar Selisih:</strong> Terdapat selisih faktur barang <strong>${formatCurrency(salesVsInvDiff)}</strong> (transaksi belum terbit faktur) + debit beban Bill <strong>+${formatCurrency(row.billDebit)}</strong> yang membebani Piutang Usaha.`;
+        auditExplanation = `<strong>Akar Selisih:</strong> Terdapat selisih faktur barang <strong>${formatCurrency(row.variance)}</strong> dibanding faktur Invoices di Jurnal (komponen Bill: +${formatCurrency(row.billDebit)}).`;
       } else {
         alertClass = 'alert-danger';
         auditExplanation = `<strong>Akar Selisih:</strong> Nilai penjualan pada Sales Report berselisih <strong>${formatCurrency(row.variance)}</strong> dibanding faktur Invoices di Jurnal.`;
@@ -1304,12 +1306,12 @@ function renderReconcileTable() {
                 </div>
                 <div class="kpi-sep">=</div>
                 <div class="kpi-item">
-                  <span class="kpi-label">Debit Jurnal</span>
-                  <span class="kpi-val" style="color:var(--accent-indigo);">${formatCurrency(row.journalDebit)}</span>
+                  <span class="kpi-label">Total Debit Jurnal</span>
+                  <span class="kpi-val" style="color:var(--accent-indigo);">${formatCurrency(row.totalDebit)}</span>
                 </div>
                 <div class="kpi-sep">&bull;</div>
                 <div class="kpi-item ${Math.abs(row.variance) > 0.05 ? 'highlight-variance' : 'highlight-clean'}">
-                  <span class="kpi-label">Selisih Bersih</span>
+                  <span class="kpi-label">Selisih Faktur</span>
                   <span class="kpi-val">${formatCurrency(row.variance)}</span>
                 </div>
               </div>
