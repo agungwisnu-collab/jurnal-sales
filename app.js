@@ -99,6 +99,42 @@ const cleanJournalLabel = (rawLabel) => {
   return lbl;
 };
 
+/**
+ * Format tanggal pengiriman (Shipped Date) ke standar DD/MM/YYYY
+ */
+const formatShippedDate = (val) => {
+  if (!val) return '';
+  if (typeof XLSX !== 'undefined' && XLSX.SSF && typeof val === 'number') {
+    const p = XLSX.SSF.parse_date_code(val);
+    if (p) {
+      const dd = String(p.d).padStart(2, '0');
+      const mm = String(p.m).padStart(2, '0');
+      return `${dd}/${mm}/${p.y}`;
+    }
+  }
+  if (val instanceof Date) {
+    const d = new Date(val.getTime() + 60000);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  const s = String(val).trim();
+  const matchIso = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (matchIso) {
+    const dd = String(matchIso[3]).padStart(2, '0');
+    const mm = String(matchIso[2]).padStart(2, '0');
+    return `${dd}/${mm}/${matchIso[1]}`;
+  }
+  const matchDm = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (matchDm) {
+    const dd = String(matchDm[1]).padStart(2, '0');
+    const mm = String(matchDm[2]).padStart(2, '0');
+    return `${dd}/${mm}/${matchDm[3]}`;
+  }
+  return s;
+};
+
 // DOM Elements
 const el = {
   // Modal & Chips
@@ -265,19 +301,19 @@ function setupDropzones() {
     });
     dropzone.addEventListener('drop', (e) => {
       const file = e.dataTransfer.files[0];
-      if (file) handleFile(file, onLoaded, type);
+      if (file) handleFile(file, type);
     });
     inputEl.addEventListener('change', (e) => {
       const file = e.target.files[0];
-      if (file) handleFile(file, onLoaded, type);
+      if (file) handleFile(file, type);
     });
   };
 
-  setupOne(el.dropJournal, el.fileJournal, processJournalFile, 'journal');
-  setupOne(el.dropSales, el.fileSales, processSalesFile, 'sales');
+  setupOne(el.dropJournal, el.fileJournal, null, 'journal');
+  setupOne(el.dropSales, el.fileSales, null, 'sales');
 }
 
-function handleFile(file, processor, type) {
+function handleFile(file, type) {
   const isJournal = type === 'journal';
   const dropzone = isJournal ? el.dropJournal : el.dropSales;
   const badge = isJournal ? el.badgeJournal : el.badgeSales;
@@ -291,36 +327,146 @@ function handleFile(file, processor, type) {
   }
   if (progress) progress.style.display = 'block';
   if (btnPick) btnPick.disabled = true;
-  if (badge) {
-    badge.innerHTML = `<span style="color:var(--accent-blue); font-weight:600;">Memuat ${escapeHtml(file.name)} (${formatFileSize(file.size)})...</span>`;
-  }
+
+  const updateBadge = (msg) => {
+    if (badge) {
+      badge.innerHTML = `<span style="color:var(--accent-blue); font-weight:600;">${escapeHtml(msg)}</span>`;
+    }
+  };
+
+  const cleanupUI = () => {
+    if (dropzone) dropzone.classList.remove('is-loading');
+    if (progress) progress.style.display = 'none';
+    if (btnPick) btnPick.disabled = false;
+  };
+
+  updateBadge(`Mempersiapkan ${file.name} (${formatFileSize(file.size)})...`);
 
   const reader = new FileReader();
-  reader.onload = (e) => {
-    // 2. Wrap heavy SheetJS compute in setTimeout to let UI thread render first
-    setTimeout(() => {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-        processor(workbook, file.name, file.size);
-      } catch (err) {
-        showToast('Gagal Membaca Berkas', 'Format berkas tidak sesuai: ' + err.message, 'error');
-        if (badge) badge.textContent = 'Gagal memproses berkas';
-      } finally {
-        if (dropzone) dropzone.classList.remove('is-loading');
-        if (progress) progress.style.display = 'none';
-        if (btnPick) btnPick.disabled = false;
-      }
-    }, 80);
+  reader.onerror = () => {
+    showToast('Gagal Membaca Berkas', 'Tidak dapat mengakses berkas lokal.', 'error');
+    if (badge) badge.textContent = 'Gagal memproses berkas';
+    cleanupUI();
   };
+
+  reader.onload = (e) => {
+    const arrayBuffer = e.target.result;
+
+    // Web Worker untuk pemrosesan non-blocking di background thread
+    let worker = null;
+    try {
+      worker = new Worker('excel-worker.js');
+    } catch (workerErr) {
+      console.warn('Web Worker tidak didukung / diblokir (misal file:// protocol), beralih ke Main Thread:', workerErr);
+    }
+
+    if (worker) {
+      updateBadge(`Memproses di background worker (${formatFileSize(file.size)})...`);
+
+      worker.onmessage = (event) => {
+        const res = event.data;
+        if (res.status === 'progress') {
+          updateBadge(res.message);
+        } else if (res.status === 'done') {
+          worker.terminate();
+          cleanupUI();
+          if (type === 'journal') {
+            applyJournalData(res.rows, res.name, res.size);
+          } else {
+            applySalesData(res.rows, res.name, res.size, res.totalRawRows, res.successRows);
+          }
+        } else if (res.status === 'error') {
+          worker.terminate();
+          cleanupUI();
+          showToast('Gagal Memproses Berkas', res.message, 'error');
+          if (badge) badge.textContent = 'Gagal memproses berkas';
+        }
+      };
+
+      worker.onerror = (err) => {
+        console.warn('Worker runtime error, beralih ke parser main thread:', err);
+        worker.terminate();
+        runMainThreadParser(arrayBuffer, file, type, updateBadge, cleanupUI);
+      };
+
+      // Transfer ArrayBuffer ke worker secara zero-copy
+      worker.postMessage({ data: arrayBuffer, type, name: file.name, size: file.size }, [arrayBuffer]);
+    } else {
+      // Fallback Main Thread
+      runMainThreadParser(arrayBuffer, file, type, updateBadge, cleanupUI);
+    }
+  };
+
   reader.readAsArrayBuffer(file);
 }
 
-function processJournalFile(wb, name, size) {
-  state.rawJournalWb = wb;
-  const sheetName = wb.SheetNames.includes('Journal Entry') ? 'Journal Entry' : wb.SheetNames[0];
-  const sheet = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+function runMainThreadParser(arrayBuffer, file, type, updateBadge, cleanupUI) {
+  updateBadge(`Mengekstrak lembar data (${formatFileSize(file.size)})...`);
+
+  setTimeout(() => {
+    try {
+      const data = new Uint8Array(arrayBuffer);
+      const wb = XLSX.read(data, { type: 'array', cellDates: true, dense: true });
+
+      if (type === 'journal') {
+        const sheetName = wb.SheetNames.includes('Journal Entry') ? 'Journal Entry' : wb.SheetNames[0];
+        const sheet = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        cleanupUI();
+        applyJournalData(rows, file.name, file.size);
+      } else {
+        const sheetName = wb.SheetNames.includes('Sales')
+          ? 'Sales'
+          : (wb.SheetNames.includes('Sales Report') ? 'Sales Report' : wb.SheetNames[0]);
+        const sheet = wb.Sheets[sheetName];
+        const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+        const totalRaw = rawRows.length - 1;
+        const header = (rawRows[0] || []).map(h => String(h || '').trim());
+
+        const neededCols = [
+          'Entitas', 'Kanal', 'Group', 'MetodeBayar', 'Warehouse',
+          'Code SKU', 'Product Name', 'Totalperline', 'Quantity',
+          'Ongkir', 'DiscountOngkir', 'ShippingFee', 'Status', 'Shipped Date'
+        ];
+
+        const matchedCols = [];
+        const colIndices = [];
+        neededCols.forEach(col => {
+          const idx = header.findIndex(h => h.toLowerCase() === col.toLowerCase());
+          if (idx !== -1) {
+            matchedCols.push(header[idx]);
+            colIndices.push(idx);
+          }
+        });
+
+        const statusIdx = header.findIndex(h => h.toLowerCase() === 'status');
+        const filtered = [matchedCols];
+
+        for (let i = 1; i < rawRows.length; i++) {
+          const r = rawRows[i];
+          if (!r || r.length === 0) continue;
+
+          if (statusIdx !== -1) {
+            const st = String(r[statusIdx] || '').trim().toLowerCase();
+            if (st && !st.includes('success') && !st.includes('progress')) continue;
+          }
+
+          const cleanRow = colIndices.map(idx => (r[idx] !== undefined ? r[idx] : ''));
+          filtered.push(cleanRow);
+        }
+
+        cleanupUI();
+        applySalesData(filtered, file.name, file.size, totalRaw, filtered.length - 1);
+      }
+    } catch (err) {
+      cleanupUI();
+      showToast('Gagal Membaca Berkas', 'Format berkas tidak sesuai: ' + err.message, 'error');
+    }
+  }, 50);
+}
+
+function applyJournalData(rows, name, size) {
   state.rawJournalRows = rows;
 
   if (el.dropJournal) el.dropJournal.classList.add('file-loaded');
@@ -336,15 +482,16 @@ function processJournalFile(wb, name, size) {
   showToast('Jurnal Finance Dimuat', `${name} (${formatNumber(rows.length - 1)} baris)`, 'success');
 }
 
-function processSalesFile(wb, name, size) {
-  const sheetName = wb.SheetNames.includes('Sales') ? 'Sales' : wb.SheetNames[0];
-  const sheet = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+function applySalesData(rows, name, size, totalRawRows, successRows) {
   state.rawSalesRows = rows;
 
   if (el.dropSales) el.dropSales.classList.add('file-loaded');
   if (el.badgeSales) {
-    el.badgeSales.innerHTML = `<span class="text-emerald" style="font-weight:600;">✓ Siap: ${formatNumber(rows.length - 1)} baris (${formatFileSize(size)})</span>`;
+    let badgeText = `✓ Siap: ${formatNumber(rows.length - 1)} baris (${formatFileSize(size)})`;
+    if (totalRawRows && totalRawRows > (rows.length - 1)) {
+      badgeText = `✓ Siap: ${formatNumber(rows.length - 1)} baris diproses (dari ${formatNumber(totalRawRows)} baris, ${formatFileSize(size)})`;
+    }
+    el.badgeSales.innerHTML = `<span class="text-emerald" style="font-weight:600;">${badgeText}</span>`;
     el.badgeSales.classList.add('loaded');
   }
   if (el.valSales) el.valSales.textContent = name;
@@ -352,7 +499,7 @@ function processSalesFile(wb, name, size) {
   if (el.chipSales) el.chipSales.classList.add('loaded');
 
   checkReadyState();
-  showToast('Laporan Sales Dimuat', `${name} (${formatNumber(rows.length - 1)} baris)`, 'success');
+  showToast('Laporan Sales Dimuat', `${name} (${formatNumber(rows.length - 1)} baris diproses)`, 'success');
 }
 
 function checkReadyState() {
@@ -490,18 +637,19 @@ function generateBalancedJournal() {
     const colDiscOngkir = sHeaders.indexOf('DiscountOngkir');
     const colShipping = sHeaders.indexOf('ShippingFee');
     const colStatus = sHeaders.indexOf('Status');
+    const colShipped = sHeaders.indexOf('Shipped Date');
 
-    // Group By: Entitas, Kanal, Group, Metode, SKU, Product, Warehouse
+    // Group By: Entitas, Kanal, Group, ShippedDate, Metode, SKU, Product, Warehouse
     const aggMap = new Map();
 
     for (let r = 1; r < sRows.length; r++) {
       const row = sRows[r];
       if (!row || row.length === 0) continue;
 
-      // Filter status pesanan: hanya proses yang sukses (Success & Success DFOD), abaikan retur (Return Putaway)
+      // Filter status pesanan: proses status sukses (Success & Success DFOD) dan On Progress, abaikan retur (Return Putaway)
       if (colStatus !== -1) {
         const st = String(row[colStatus] || '').trim().toLowerCase();
-        if (st && !st.includes('success')) {
+        if (st && !st.includes('success') && !st.includes('progress')) {
           continue;
         }
       }
@@ -513,6 +661,7 @@ function generateBalancedJournal() {
       const warehouse = String(row[colWarehouse] || 'jakarta').trim();
       const sku = String(row[colSKU] || '').trim();
       const product = String(row[colProduct] || '').trim();
+      const shippedDate = colShipped !== -1 ? formatShippedDate(row[colShipped]) : '';
 
       const total = Number(row[colTotal]) || 0;
       const qty = Number(row[colQty]) || 0;
@@ -520,13 +669,14 @@ function generateBalancedJournal() {
       const discOngkir = Number(row[colDiscOngkir]) || 0;
       const shipping = Number(row[colShipping]) || 0;
 
-      const key = `${entitas}|||${kanal}|||${group}|||${metode}|||${sku}|||${product}|||${warehouse}`;
+      const key = `${entitas}|||${kanal}|||${group}|||${shippedDate}|||${metode}|||${sku}|||${product}|||${warehouse}`;
 
       if (!aggMap.has(key)) {
         aggMap.set(key, {
           entitas,
           kanal,
           group,
+          shippedDate,
           metode,
           sku,
           product,
@@ -561,7 +711,12 @@ function generateBalancedJournal() {
 
       const companyName = item.entitas === 'FH' ? 'PT Family Herbal' : 'PT Family Herbal Indonesia';
       const partnerName = `${item.kanal} ${item.group}`.trim();
-      const baseLabel = `${partnerName} ${item.metode} | ${item.sku} ${item.product}`.trim();
+      let baseLabel = '';
+      if (item.shippedDate) {
+        baseLabel = `${partnerName} ${item.shippedDate} ${item.metode} , ${item.sku} ${item.product} x ${item.quantity} , ${item.warehouse}`.trim();
+      } else {
+        baseLabel = `${partnerName} ${item.metode} | ${item.sku} ${item.product}`.trim();
+      }
       const analyticGroup = `[${item.entitas}] Channel : ${item.kanal}/Sub : ${item.group}/Platform : ${item.kanal}`;
 
       // Invoices Account
@@ -584,7 +739,7 @@ function generateBalancedJournal() {
 
       // 1. Invoices Block
       generatedRows.push([
-        partnerName, baseLabel, analyticGroup, partnerName, '',
+        partnerName, baseLabel, analyticGroup, partnerName, item.shippedDate || '',
         item.metode, `[${item.entitas}] Invoices`, companyName,
         piutangAccount, baseLabel, analyticGroup, item.total, ''
       ]);
@@ -847,29 +1002,33 @@ function runReconciliation(autoHide = true) {
   const colDiscOngkir = sHeaders.indexOf('DiscountOngkir');
   const colShipping = sHeaders.indexOf('ShippingFee');
   const colStatus = sHeaders.indexOf('Status');
+  const colShipped = sHeaders.indexOf('Shipped Date');
 
-  // Grouping: Key = (Entitas, Label)
-  const salesGrouped = new Map();
+  const jRows = state.normalizedJournalRows;
+  const isGranularJournal = jRows.some((r, idx) => idx > 0 && String(r[9] || '').includes(' , '));
+
+  const tempGrouped = new Map();
 
   for (let r = 1; r < sRows.length; r++) {
     const row = sRows[r];
     if (!row || row.length === 0) continue;
 
-    // Filter status pesanan: hanya proses yang sukses (Success & Success DFOD), abaikan retur (Return Putaway)
+    // Filter status pesanan: proses status sukses (Success & Success DFOD) dan On Progress, abaikan retur (Return Putaway)
     if (colStatus !== -1) {
       const st = String(row[colStatus] || '').trim().toLowerCase();
-      if (st && !st.includes('success')) {
+      if (st && !st.includes('success') && !st.includes('progress')) {
         continue;
       }
     }
 
-    const entitas = String(row[colEntitas] || '').trim();
+    const entitas = String(row[colEntitas] || 'FHI').trim();
     const kanal = String(row[colKanal] || '').trim();
     const group = String(row[colGroup] || '').trim();
     const metode = String(row[colMetode] || '').trim();
     const warehouse = String(row[colWarehouse] || 'Gudang Utama').trim();
     const sku = String(row[colSKU] || '').trim();
     const product = String(row[colProduct] || '').trim();
+    const shippedDate = colShipped !== -1 ? formatShippedDate(row[colShipped]) : '';
 
     const total = Number(row[colTotal]) || 0;
     const qty = Number(row[colQty]) || 0;
@@ -877,18 +1036,23 @@ function runReconciliation(autoHide = true) {
     const discOngkir = Number(row[colDiscOngkir]) || 0;
     const shipping = Number(row[colShipping]) || 0;
 
-    const label = `${kanal} ${group} ${metode} | ${sku} ${product}`.trim();
-    const groupKey = `${entitas}:::${label}`;
+    let aggKey;
+    if (isGranularJournal) {
+      aggKey = `${entitas}|||${kanal}|||${group}|||${shippedDate}|||${metode}|||${sku}|||${product}|||${warehouse}`;
+    } else {
+      aggKey = `${entitas}|||${kanal}|||${group}|||${metode}|||${sku}|||${product}`;
+    }
 
-    if (!salesGrouped.has(groupKey)) {
-      salesGrouped.set(groupKey, {
+    if (!tempGrouped.has(aggKey)) {
+      tempGrouped.set(aggKey, {
         entitas,
         kanal,
         group,
+        shippedDate,
         metode,
         sku,
         product,
-        label,
+        warehouse,
         totalPerline: 0,
         quantity: 0,
         ongkir: 0,
@@ -898,7 +1062,7 @@ function runReconciliation(autoHide = true) {
       });
     }
 
-    const item = salesGrouped.get(groupKey);
+    const item = tempGrouped.get(aggKey);
     item.totalPerline += total;
     item.quantity += qty;
     item.ongkir += ongkir;
@@ -923,8 +1087,21 @@ function runReconciliation(autoHide = true) {
     whData.shippingFee += shipping;
   }
 
+  // Final salesGrouped keyed by label
+  const salesGrouped = new Map();
+  tempGrouped.forEach((item) => {
+    let label;
+    if (isGranularJournal) {
+      label = `${item.kanal} ${item.group} ${item.shippedDate} ${item.metode} , ${item.sku} ${item.product} x ${item.quantity} , ${item.warehouse}`.trim();
+    } else {
+      label = `${item.kanal} ${item.group} ${item.metode} | ${item.sku} ${item.product}`.trim();
+    }
+    item.label = label;
+    const groupKey = `${item.entitas}:::${label.toLowerCase()}`;
+    salesGrouped.set(groupKey, item);
+  });
+
   // B. Group Normalized Journal Entries (Separate Invoices vs Bill)
-  const jRows = state.normalizedJournalRows;
   const journalMap = new Map();
 
   let j = 1;
@@ -932,21 +1109,25 @@ function runReconciliation(autoHide = true) {
     const row = jRows[j];
     const journalType = String(row[6] || '').trim();
     const company = String(row[7] || '').trim();
-    let label = cleanJournalLabel(row[9]);
+    const rawLabel = String(row[9] || '').trim();
     const debit = Number(row[11]) || 0;
     const account = String(row[8] || '').trim();
 
     let entitasCode = 'FHI';
-    if (company.toLowerCase().includes('indonesia')) {
-      entitasCode = 'FHI';
-    } else if (company.toLowerCase().includes('family herbal')) {
-      entitasCode = 'FH';
+    if (company.toLowerCase().includes('family herbal')) {
+      entitasCode = company.toLowerCase().includes('indonesia') ? 'FHI' : 'FH';
     }
 
-    const jKey = `${entitasCode}:::${label}`;
+    let lookupLabel = rawLabel;
+    if (!isGranularJournal) {
+      lookupLabel = cleanJournalLabel(rawLabel);
+    }
+
+    const jKey = `${entitasCode}:::${lookupLabel.toLowerCase()}`;
 
     if (!journalMap.has(jKey)) {
       journalMap.set(jKey, {
+        rawLabel,
         totalDebit: 0,
         invoicesDebit: 0,
         billDebit: 0,
@@ -954,20 +1135,27 @@ function runReconciliation(autoHide = true) {
         billCredit: 0,
         entriesCount: 0,
         billsCount: 0,
-        unbalancedBillsCount: 0
+        unbalancedBillsCount: 0,
+        breakdown: {
+          invoices: { debit: 0, credit: 0, count: 0 },
+          inventory: { debit: 0, credit: 0, count: 0 },
+          bill: { debit: 0, credit: 0, count: 0 }
+        }
       });
     }
 
     const entry = journalMap.get(jKey);
 
-    if (journalType.toLowerCase() === 'bill') {
-      // Tentukan batas blok Bill secara dinamis
-      let nextJ = j + 1;
-      while (nextJ < jRows.length && String(jRows[nextJ][6] || '').trim() === '') {
-        nextJ++;
-      }
-      const blockRows = jRows.slice(j, nextJ);
+    // Tentukan batas blok dinamis untuk entri jurnal ini (semua baris sampai ada nama Journal baru)
+    let nextJ = j + 1;
+    while (nextJ < jRows.length && String(jRows[nextJ][6] || '').trim() === '') {
+      nextJ++;
+    }
+    const blockRows = jRows.slice(j, nextJ);
 
+    const jTypeLower = journalType.toLowerCase();
+
+    if (jTypeLower === 'bill') {
       let bDebitSum = 0;
       let bPromoSum = 0;
       let bCreditSum = 0;
@@ -989,33 +1177,71 @@ function runReconciliation(autoHide = true) {
         }
       });
 
+      const totalDr = bDebitSum + bPromoSum;
       entry.billDebit += bDebitSum;
       entry.billPromoDebit += bPromoSum;
       entry.billCredit += bCreditSum;
       entry.totalDebit += bDebitSum;
       entry.billsCount = (entry.billsCount || 0) + 1;
 
+      entry.breakdown.bill.debit += totalDr;
+      entry.breakdown.bill.credit += bCreditSum;
+      entry.breakdown.bill.count += blockRows.length;
+
       // Cek keseimbangan internal baris Bill (Dr_total == Cr_total)
-      const billDrSum = bDebitSum + bPromoSum;
-      if (Math.abs(billDrSum - bCreditSum) > 0.05) {
+      if (Math.abs(totalDr - bCreditSum) > 0.05) {
         entry.unbalancedBillsCount = (entry.unbalancedBillsCount || 0) + 1;
       }
 
       j = nextJ;
       continue;
-    } else {
-      const isInvoice = journalType.toLowerCase().includes('invoice');
-      const isPiutang = account.includes('Piutang'); // mencakup 10140101 Piutang Usaha & 10140201 Piutang Pihak Usaha
-      const isRevenue = account.includes('Pendapatan');
+    } else if (jTypeLower.includes('inventory')) {
+      let invDr = 0;
+      let invCr = 0;
 
-      if (isInvoice || isPiutang || isRevenue) {
-        if (debit > 0) {
-          entry.invoicesDebit += debit;
-          entry.totalDebit += debit;
-          entry.entriesCount += 1;
+      blockRows.forEach((bRow) => {
+        invDr += Number(bRow[11]) || 0;
+        invCr += Number(bRow[12]) || 0;
+      });
+
+      entry.breakdown.inventory.debit += invDr;
+      entry.breakdown.inventory.credit += invCr;
+      entry.breakdown.inventory.count += blockRows.length;
+
+      j = nextJ;
+      continue;
+    } else {
+      let invDr = 0;
+      let invCr = 0;
+
+      blockRows.forEach((bRow) => {
+        const dr = Number(bRow[11]) || 0;
+        const cr = Number(bRow[12]) || 0;
+        const acct = String(bRow[8] || '').trim();
+
+        const isInvoice = journalType.toLowerCase().includes('invoice');
+        const isPiutang = acct.includes('Piutang');
+        const isRevenue = acct.includes('Pendapatan');
+
+        if (dr > 0) {
+          invDr += dr;
+          if (isInvoice || isPiutang || isRevenue) {
+            entry.invoicesDebit += dr;
+            entry.totalDebit += dr;
+            entry.entriesCount += 1;
+          }
         }
-      }
-      j++;
+        if (cr > 0) {
+          invCr += cr;
+        }
+      });
+
+      entry.breakdown.invoices.debit += invDr;
+      entry.breakdown.invoices.credit += invCr;
+      entry.breakdown.invoices.count += blockRows.length;
+
+      j = nextJ;
+      continue;
     }
   }
 
@@ -1101,6 +1327,11 @@ function runReconciliation(autoHide = true) {
       discOngkir: discOngkir,
       netOngkir: netOngkir,
       isBillBalanced: isBillInternallyBalanced,
+      journalBreakdown: jMatch ? jMatch.breakdown : {
+        invoices: { debit: 0, credit: 0, count: 0 },
+        inventory: { debit: 0, credit: 0, count: 0 },
+        bill: { debit: 0, credit: 0, count: 0 }
+      },
       warehouses: whList,
       status: status
     });
@@ -1352,6 +1583,55 @@ function renderReconcileTable() {
         auditExplanation = `<strong>Selisih Faktur:</strong> Sales berselisih <strong>${formatCurrency(row.variance)}</strong> dibanding Jurnal.`;
       }
 
+      // Multi-Journal Breakdown Table
+      const bd = row.journalBreakdown || {
+        invoices: { debit: 0, credit: 0 },
+        inventory: { debit: 0, credit: 0 },
+        bill: { debit: 0, credit: 0 }
+      };
+
+      const jTypesList = [
+        { label: '📄 Invoices', desc: 'Faktur Penjualan Barang', data: bd.invoices },
+        { label: '📦 Inventory Valuation', desc: 'Persediaan &amp; HPP Internal', data: bd.inventory },
+        { label: '🚚 Bill', desc: 'Tagihan Ekspedisi &amp; Promo', data: bd.bill }
+      ];
+
+      const breakdownRowsHtml = jTypesList.map(jt => {
+        const dVal = jt.data ? jt.data.debit : 0;
+        const cVal = jt.data ? jt.data.credit : 0;
+        const diff = Math.abs(dVal - cVal);
+        let statusTag = '';
+
+        if (dVal === 0 && cVal === 0) {
+          statusTag = '<span style="color: var(--text-muted); font-size:10.5px;">(Tidak ada)</span>';
+        } else if (diff <= 0.05) {
+          statusTag = '<span style="color: var(--accent-emerald); font-size:10.5px; font-weight:600;">✓ Seimbang</span>';
+        } else {
+          statusTag = `<span style="color: var(--accent-rose); font-size:10.5px; font-weight:600;">⚠ Selisih ${formatCurrency(diff)}</span>`;
+        }
+
+        return `
+          <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+            <td style="padding: 3px 6px;">
+              <span style="font-weight: 500;">${jt.label}</span>
+              <span style="font-size: 10px; color: var(--text-muted); display: block;">${jt.desc}</span>
+            </td>
+            <td style="padding: 3px 6px; text-align: right; font-family: var(--font-mono);">${dVal > 0 ? formatCurrency(dVal) : '-'}</td>
+            <td style="padding: 3px 6px; text-align: right; font-family: var(--font-mono);">${cVal > 0 ? formatCurrency(cVal) : '-'}</td>
+            <td style="padding: 3px 6px; text-align: right;">${statusTag}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const totalDr = (bd.invoices?.debit || 0) + (bd.inventory?.debit || 0) + (bd.bill?.debit || 0);
+      const totalCr = (bd.invoices?.credit || 0) + (bd.inventory?.credit || 0) + (bd.bill?.credit || 0);
+      const totalDiff = Math.abs(totalDr - totalCr);
+      const totalTag = (totalDr === 0 && totalCr === 0)
+        ? '<span style="color: var(--text-muted); font-size:10.5px;">-</span>'
+        : (totalDiff <= 0.05
+          ? '<span style="color: var(--accent-emerald); font-size:10.5px; font-weight:700;">✓ Klop</span>'
+          : `<span style="color: var(--accent-rose); font-size:10.5px; font-weight:700;">⚠ Selisih ${formatCurrency(totalDiff)}</span>`);
+
       subTr.innerHTML = `
         <td colspan="9">
           <div class="breakdown-dual-layout">
@@ -1382,6 +1662,32 @@ function renderReconcileTable() {
               </div>
               <div class="audit-summary-alert ${alertClass}">
                 ${auditExplanation}
+              </div>
+
+              <!-- Rincian Multi-Journal Debit & Kredit -->
+              <div style="margin-top: 8px; background: rgba(0,0,0,0.18); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px 8px;">
+                <div style="font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
+                  Perhitungan Debit &amp; Kredit Tiap Journal
+                </div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                  <thead>
+                    <tr style="color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); text-align: left; font-size: 10px;">
+                      <th style="padding: 2px 6px; font-weight: 500;">Kolom Journal</th>
+                      <th style="padding: 2px 6px; text-align: right; font-weight: 500;">Debit</th>
+                      <th style="padding: 2px 6px; text-align: right; font-weight: 500;">Kredit</th>
+                      <th style="padding: 2px 6px; text-align: right; font-weight: 500;">Keseimbangan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${breakdownRowsHtml}
+                    <tr style="border-top: 1px solid var(--border-subtle); font-weight: 600; background: rgba(255,255,255,0.02);">
+                      <td style="padding: 4px 6px; font-size: 10.5px;">Total Mutasi Buku</td>
+                      <td style="padding: 4px 6px; text-align: right; font-family: var(--font-mono);">${formatCurrency(totalDr)}</td>
+                      <td style="padding: 4px 6px; text-align: right; font-family: var(--font-mono);">${formatCurrency(totalCr)}</td>
+                      <td style="padding: 4px 6px; text-align: right;">${totalTag}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
